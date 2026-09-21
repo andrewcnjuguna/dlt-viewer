@@ -5233,17 +5233,54 @@ void MainWindow::controlMessage_ReceiveControlMessage(EcuItem *ecuitem, const QD
                         },
                         [&](const qdlt::msg::payload::GetLogInfo& payload) {
                             if (payload.status == 8) {
+                                /* no matching context ids */
                                 ecuitem->InvalidAll();
                             }
 
-                            if (payload.status == 6 || payload.status == 7) {
+                            if (payload.status == 9) {
+                                /* The ECU could not fit the requested log info into a
+                                 * single DLT message. Tell the user instead of silently
+                                 * leaving the tree empty. */
+                                const QString warning = QString("ECU %1: get log info response too large "
+                                                                "(overflow), log levels are incomplete")
+                                                                .arg(msg.getEcuid());
+                                qDebug() << warning;
+                                if (statusBar()) {
+                                    statusBar()->showMessage(warning, 10000);
+                                }
+                            }
+
+                            /* Status 3 to 7 all carry application and context ids; which
+                             * further fields are present is handled by the payload parser. */
+                            if (payload.status >= 3 && payload.status <= 7) {
+                                const bool hasDescriptions = (payload.status == 7);
                                 for (const auto& app : payload.apps) {
+                                    /* Only touch the description when the response actually
+                                     * carries one, so that descriptions fetched earlier are
+                                     * not overwritten with empty strings. */
+                                    if (hasDescriptions || !ecuitem->find(app.id)) {
+                                        controlMessage_SetApplication(ecuitem, app.id, app.description,
+                                                                      hasDescriptions);
+                                    }
                                     for (const auto& ctx : app.ctxs) {
                                         controlMessage_SetContext(ecuitem, app.id, ctx.id, ctx.description,
-                                        ctx.logLevel, ctx.traceStatus);
+                                        ctx.logLevel, ctx.traceStatus, hasDescriptions);
                                     }
-                                    if (payload.status == 7) {
-                                        controlMessage_SetApplication(ecuitem, app.id, app.description);
+                                }
+
+                                /* The wildcard request does not ask for textual descriptions,
+                                 * because a response containing them can exceed the maximum
+                                 * DLT message size. Fetch them per application instead, but
+                                 * only when they are displayed and not already known, to keep
+                                 * the number of control messages down. */
+                                if (!hasDescriptions &&
+                                    ((settings->showApId && settings->showApIdDesc) ||
+                                     (settings->showCtId && settings->showCtIdDesc))) {
+                                    for (const auto& app : payload.apps) {
+                                        const ApplicationItem* appitem = ecuitem->find(app.id);
+                                        if (!appitem || appitem->description.isEmpty()) {
+                                            controlMessage_GetLogInfoApplication(ecuitem, app.id);
+                                        }
                                     }
                                 }
                             }
@@ -5673,8 +5710,29 @@ void MainWindow::controlMessage_SetTimingPackets(EcuItem* ecuitem, bool enable) 
 void MainWindow::controlMessage_GetLogInfo(EcuItem* ecuitem) {
     DltServiceGetLogInfoRequest req;
     req.service_id = DLT_SERVICE_ID_GET_LOG_INFO;
-    req.options = 7;
+    /* Option 6 (log level + trace status) instead of option 7 (which adds textual
+     * descriptions): a complete option 7 response for an ECU with a large number of
+     * registered applications does not fit into the 65535 bytes a DLT message can
+     * hold, and daemons answer that with status 9, a truncated reply or no reply at
+     * all. Descriptions can be requested per application id, see
+     * controlMessage_GetLogInfoApplication(). */
+    req.options = 6;
     dlt_set_id(req.apid, "");
+    dlt_set_id(req.ctid, "");
+    dlt_set_id(req.com, "remo");
+
+    QDltMsgWrapper msgWrapper(std::move(req));
+    controlMessage_SendControlMessage(ecuitem, msgWrapper.getMessage(), "", "");
+}
+
+/* Request the full log info including textual descriptions for a single application.
+ * Restricting the request to one application id keeps the response well below the
+ * maximum DLT message size, which a wildcard option 7 request can exceed. */
+void MainWindow::controlMessage_GetLogInfoApplication(EcuItem* ecuitem, const QString& apid) {
+    DltServiceGetLogInfoRequest req;
+    req.service_id = DLT_SERVICE_ID_GET_LOG_INFO;
+    req.options = 7;
+    dlt_set_id(req.apid, apid.toUtf8().constData());
     dlt_set_id(req.ctid, "");
     dlt_set_id(req.com, "remo");
 
@@ -5941,10 +5999,13 @@ void MainWindow::on_action_menuDLT_Send_Injection_triggered()
     //                         QString("No ECU selected in configuration!"));
 }
 
-void MainWindow::controlMessage_SetApplication(EcuItem *ecuitem, QString apid, QString appdescription)
+void MainWindow::controlMessage_SetApplication(EcuItem *ecuitem, QString apid, QString appdescription,
+                                               bool updatedescription)
 {
     if (auto appitem = ecuitem->find(apid); appitem) {
-        appitem->description = appdescription;
+        if (updatedescription) {
+            appitem->description = appdescription;
+        }
         appitem->update();
     } else {
         appitem = new ApplicationItem(ecuitem);
@@ -5955,7 +6016,8 @@ void MainWindow::controlMessage_SetApplication(EcuItem *ecuitem, QString apid, Q
     }
 }
 
-void MainWindow::controlMessage_SetContext(EcuItem *ecuitem, QString apid, QString ctid,QString ctdescription,int log_level,int trace_status)
+void MainWindow::controlMessage_SetContext(EcuItem *ecuitem, QString apid, QString ctid,QString ctdescription,int log_level,int trace_status,
+                                           bool updatedescription)
 {
     if (auto appitem = ecuitem->find(apid); appitem) {
 
@@ -5974,7 +6036,9 @@ void MainWindow::controlMessage_SetContext(EcuItem *ecuitem, QString apid, QStri
         conitem->id = ctid;
         conitem->loglevel = log_level;
         conitem->tracestatus = trace_status;
-        conitem->description = ctdescription;
+        if (updatedescription) {
+            conitem->description = ctdescription;
+        }
         conitem->status = ContextItem::valid;
         conitem->update();
     } else {

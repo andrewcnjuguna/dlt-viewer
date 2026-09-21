@@ -323,9 +323,12 @@ private:
     void controlMessage_SetTimingPackets(EcuItem* ecuitem, bool enable);
     void controlMessage_GetSoftwareVersion(EcuItem* ecuitem);
     void controlMessage_GetLogInfo(EcuItem* ecuitem);
+    void controlMessage_GetLogInfoApplication(EcuItem* ecuitem, const QString& apid);
     void controlMessage_ReceiveControlMessage(EcuItem *ecuitem, const QDltMsg &msg);
-    void controlMessage_SetContext(EcuItem *ecuitem, QString apid, QString ctid,QString ctdescription,int log_level,int trace_status);
-    void controlMessage_SetApplication(EcuItem *ecuitem, QString apid, QString appdescription);
+    void controlMessage_SetContext(EcuItem *ecuitem, QString apid, QString ctid,QString ctdescription,int log_level,int trace_status,
+                                   bool updatedescription = true);
+    void controlMessage_SetApplication(EcuItem *ecuitem, QString apid, QString appdescription,
+                                       bool updatedescription = true);
     void controlMessage_Marker();
 
     void filterDialogRead(FilterDialog &dlg,FilterItem* item);

@@ -86,9 +86,23 @@ Type parse(const QByteArray& data, bool isBigEndian)
         {
             GetLogInfo msg;
             msg.status = dltPayloadRead<uint8_t>(dataPtr, length, isBigEndian);
-            if ((msg.status != 6) && (msg.status != 7)) {
+
+            /* The payload layout depends on the status, which mirrors the options
+             * field of the request:
+             *   3: application id + context id
+             *   4: + log level
+             *   5: + trace status
+             *   6: + log level + trace status
+             *   7: + log level + trace status + textual descriptions
+             * Status 8 (no matching context ids) and 9 (response data overflow)
+             * carry no application data at all. */
+            if ((msg.status < 3) || (msg.status > 7)) {
                 return msg;
             }
+
+            const bool withLogLevel = (msg.status == 4) || (msg.status == 6) || (msg.status == 7);
+            const bool withTraceStatus = (msg.status == 5) || (msg.status == 6) || (msg.status == 7);
+            const bool withDescription = (msg.status == 7);
 
             const auto numApps = dltPayloadRead<uint16_t>(dataPtr, length, isBigEndian);
             for (uint16_t i = 0; i < numApps; i++) {
@@ -98,12 +112,18 @@ Type parse(const QByteArray& data, bool isBigEndian)
                 for (uint16_t j = 0; j < numCtx; j++) {
                     GetLogInfo::App::Ctx ctx;
                     ctx.id = asQString(dltPayloadReadId(dataPtr, length));
-                    ctx.logLevel = dltPayloadRead<int8_t>(dataPtr, length, isBigEndian);
-                    ctx.traceStatus = dltPayloadRead<int8_t>(dataPtr, length, isBigEndian);
-                    ctx.description = QString::fromStdString(dltPayloadReadString(dataPtr, length, isBigEndian));
+                    if (withLogLevel) {
+                        ctx.logLevel = dltPayloadRead<int8_t>(dataPtr, length, isBigEndian);
+                    }
+                    if (withTraceStatus) {
+                        ctx.traceStatus = dltPayloadRead<int8_t>(dataPtr, length, isBigEndian);
+                    }
+                    if (withDescription) {
+                        ctx.description = QString::fromStdString(dltPayloadReadString(dataPtr, length, isBigEndian));
+                    }
                     app.ctxs.push_back(std::move(ctx));
                 }
-                if (msg.status == 7) {
+                if (withDescription) {
                     app.description = QString::fromStdString(dltPayloadReadString(dataPtr, length, isBigEndian));
                 }
                 msg.apps.push_back(std::move(app));

@@ -16,8 +16,10 @@ struct GetLogInfo {
     struct App {
         struct Ctx {
             QString id;
-            int8_t logLevel;
-            int8_t traceStatus;
+            /* -1 is DLT_LOG_DEFAULT resp. DLT_TRACE_STATUS_DEFAULT, used when the
+             * response does not carry a log level resp. trace status. */
+            int8_t logLevel = -1;
+            int8_t traceStatus = -1;
             QString description;
         };
 
