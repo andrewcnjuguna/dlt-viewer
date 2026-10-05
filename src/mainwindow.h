@@ -429,7 +429,8 @@ private:
 
 
 
-    void findFilteredLines();
+    //! Recomputes filterCountMap; returns false if the user cancelled the progress dialog.
+    bool findFilteredLines();
 
 
 protected:
@@ -464,7 +465,7 @@ private slots:
     void on_tabExplore_fileOpenRequested(const QString &path);
     void on_tabExplore_fileAppendRequested(const QString &path);
     void on_tabExplore_filesOpenRequest(const QStringList &dltPaths);
-    void on_tabExplore_filesAppendRequest(const QStringList &mf4AndPcapPaths);
+    void on_tabExplore_filesAppendRequest(const QStringList &paths);
 
     void on_configWidget_itemSelectionChanged();
     void on_pluginWidget_itemSelectionChanged();
